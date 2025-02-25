@@ -1,9 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.exc import NoResultFound
 from typing import List, Optional
 from src.models.usuarios import UsuariosModel
-from core.configs import settings
 
 
 class UsuariosRepository:

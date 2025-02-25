@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from src.controller import usuarios_controller
+from src.controller import usuarios_controller, likedins_controller
 from fastapi.middleware.cors import CORSMiddleware
 
 # Criando a instância do FastAPI
@@ -15,6 +15,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 
 # Criando endpoint
 app.include_router(usuarios_controller.router, prefix="")
+app.include_router(likedins_controller.router,prefix="")
 
 if __name__ == "__main__":
     import uvicorn

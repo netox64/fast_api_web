@@ -8,7 +8,6 @@ from src.utils.dtos.user import UserCreate
 
 class UsuariosService:
     
-    # definido como atributo
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
     def __init__(self, usuarios_repository: UsuariosRepository):
@@ -24,6 +23,9 @@ class UsuariosService:
         return pessoa
 
     async def create_usuarios(self, usuario_dto:UserCreate) -> UsuariosModel:
+        usuario_com_email = await self.get_usuario_by_email(str(usuario_dto.email))
+        if usuario_com_email:
+            raise HTTPException(status_code=409, detail="Ja existe um usuario com esse email no sistema")
         hashed_password:str = self.pwd_context.hash(usuario_dto.password)
         usuario_data = usuario_dto.model_dump()
         usuario_data['password'] = hashed_password 

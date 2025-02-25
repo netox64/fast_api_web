@@ -1,6 +1,5 @@
 from pydantic import BaseModel, EmailStr
 
-
 # Modelo de entrada (o que o cliente envia)
 class UserCreate(BaseModel):
     username: str 
