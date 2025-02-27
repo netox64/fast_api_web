@@ -10,3 +10,11 @@ class ConnectIn(BaseModel):
 class ConnectOut(BaseModel):
     total_connections: int 
     message_connections:str
+    
+class DataOut(BaseModel):
+    total_connections: int 
+    total_analisados:int
+    perfil_mais_encontrado:str
+    frequencia:int
+    message_porcentagem:str
+

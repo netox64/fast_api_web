@@ -1,11 +1,15 @@
 from src.models.linkedin import LinkedinModel
 from src.models.usuarios import UsuariosModel
 from src.repositories.linkedins_repository import LinkedinsRepository
-from typing import List, Optional
+from typing import List, Optional,Dict
 from fastapi import HTTPException
+from collections import Counter
+import time
+import re
+import random 
 
 from src.services.usuarios_service import UsuariosService
-from src.utils.dtos.connect import ConnectIn, ConnectOut
+from src.utils.dtos.connect import ConnectIn, ConnectOut, DataOut
 from src.utils.dtos.linkedin import LinkedinIn
 
 from selenium import webdriver
@@ -14,8 +18,9 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
-import time
-import random 
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.wait import WebDriverWait
+
 
 class LinkedinsService:
     def __init__(self,usuarios_service:UsuariosService, linkedins_repository: LinkedinsRepository):
@@ -73,7 +78,7 @@ class LinkedinsService:
 
         service = Service(ChromeDriverManager().install())
         chrome_options = Options()
-        if not connect_obj.mode_view:  # Verifica se o modo de visualização está desativado
+        if not connect_obj.mode_view:
             chrome_options.add_argument("--headless")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
@@ -103,18 +108,101 @@ class LinkedinsService:
                     try:
                         botao.click()
                         conexoes_realizadas += 1
-                        print(f"✅ {conexoes_realizadas} conexões) realizada(s)!")
                         time.sleep(random.uniform(3, 6))
 
                     except Exception as e:
-                        print("⚠️ Erro ao clicar no botão:", e)
+                        print("Erro ao clicar no botão:", e)
 
                 if conexoes_realizadas < MAX_CONEXOES:
-                    print("🔄 Atualizando a página para buscar mais conexões...")
                     driver.refresh()
                     time.sleep(5) 
-            print("🎉 Meta de conexões atingida!")
         finally:
             driver.quit()  # Fecha o navegador
         
         return ConnectOut(total_connections=conexoes_realizadas, message_connections="Meta de conexões atingida!")
+
+    async def get_data_rede(self, connect_obj: ConnectIn) -> DataOut:
+        usuario = await self.usuarios_service.get_usuarios_by_id(connect_obj.usuario_id)
+        if not usuario:
+            raise HTTPException(status_code=404, detail="usuario não encontrada")
+
+        linkedin = await  self.linkedins_repository.get_by_id(usuario.linkedin_id)
+        if not linkedin:
+            raise HTTPException(status_code=404, detail="Linkedin não encontrada")
+
+        EMAIL: str = linkedin.email
+        PASSWORD: str = linkedin.password
+
+        service = Service(ChromeDriverManager().install())
+        chrome_options = Options()
+        if not connect_obj.mode_view:
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+
+        MAX_CONEXOES: int = 0
+        cards_visitados: int = 0
+        lista_de_dicionarios: List[Dict[str, str]] = []
+        
+        try:
+            driver.get("https://www.linkedin.com/login")
+            time.sleep(3)
+
+            driver.find_element(By.ID, "username").send_keys(EMAIL)
+            driver.find_element(By.ID, "password").send_keys(PASSWORD)
+            driver.find_element(By.ID, "password").send_keys(Keys.RETURN)
+            time.sleep(5)
+
+            driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+            time.sleep(5)
+
+            try:
+                conexoes_text = driver.find_element(By.CSS_SELECTOR, "h1.t-18.t-black.t-normal").text
+                quant_conect_text: str = re.sub(r"[^\d.]", "", conexoes_text)
+                quant_conect_text = re.sub(r"[^\d]", "", quant_conect_text)
+                MAX_CONEXOES = int(quant_conect_text)
+
+            except Exception as e:
+                print("Erro ao capturar o número de conexões:", e)
+
+            while cards_visitados < MAX_CONEXOES:
+
+                try:
+                    connection_cards = driver.find_elements(By.CLASS_NAME, "mn-connection-card__details")
+                    for card in connection_cards:
+                        nome = card.find_element(By.CLASS_NAME, "mn-connection-card__name").text
+                        cargo = card.find_element(By.CLASS_NAME, "mn-connection-card__occupation").text
+                        lista_de_dicionarios.append({"nome": nome, "stack": cargo})
+
+                        cards_visitados += 1
+                        if cards_visitados >= MAX_CONEXOES:
+                            break 
+
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(5)
+
+                    try:
+                        exibir_mais_btn = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.XPATH, "//button[span[text()='Exibir mais resultados']]")))
+                        exibir_mais_btn.click()
+                        time.sleep(5)
+                    except Exception as e:
+                        print("Botão 'Exibir mais resultados' não encontrado ou erro:", e)
+
+                except Exception as e:
+                    print("Erro ao iterar sobre as conexões:", e)
+                    break
+
+                if cards_visitados >= MAX_CONEXOES:
+                    break
+
+        finally:
+            driver.quit()
+
+        stack_counter = Counter()
+        for pessoa in lista_de_dicionarios:
+            stacks = pessoa["stack"].split(" | ")
+            stack_counter.update(stacks)
+        stack_mais_comum, frequencia_apr = stack_counter.most_common(1)[0]
+        return DataOut(total_connections=MAX_CONEXOES,total_analisados=cards_visitados,perfil_mais_encontrado=stack_mais_comum,frequencia=frequencia_apr,message_porcentagem=f' essa stack corresponde a {round(float((frequencia_apr*100)/cards_visitados),2)} % da sua rede')
