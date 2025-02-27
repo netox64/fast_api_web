@@ -1,6 +1,6 @@
+import jwt
 from fastapi import HTTPException
 from fastapi.security import OAuth2PasswordBearer
-import jwt
 from jwt import ExpiredSignatureError, InvalidTokenError
 from src.models.usuarios import UsuariosModel
 from src.services.usuarios_service import UsuariosService
@@ -8,11 +8,14 @@ from src.utils.dtos.user_login import LoginRequest
 from fastapi import status
 from passlib.context import CryptContext
 from datetime import datetime, timedelta, timezone
+from decouple import Config
+from pathlib import Path
 
 
 class AuthService:
-    
-    SECRET_KEY = "secretkey"
+    config = Config(str(Path(__file__).resolve().parent.parent.parent / ".env"))
+
+    SECRET_KEY = config("SECRET_KEY", default="segredodojwt")
     ALGORITHM = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES = 30
     

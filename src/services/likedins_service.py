@@ -1,35 +1,34 @@
-from src.models.linkedin import LinkedinModel
-from src.models.usuarios import UsuariosModel
-from src.repositories.linkedins_repository import LinkedinsRepository
-from typing import List, Optional,Dict
-from fastapi import HTTPException
-from collections import Counter
 import time
+import random
 import re
-import random 
-
-from src.services.usuarios_service import UsuariosService
-from src.utils.dtos.connect import ConnectIn, ConnectOut, DataOut
-from src.utils.dtos.linkedin import LinkedinIn
-
+from typing import List, Optional, Dict
+from collections import Counter
+from fastapi import HTTPException
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.wait import WebDriverWait
+from webdriver_manager.chrome import ChromeDriverManager
+
+from src.models.linkedin import LinkedinModel
+from src.models.usuarios import UsuariosModel
+from src.repositories.linkedins_repository import LinkedinsRepository
+from src.services.usuarios_service import UsuariosService
+from src.utils.dtos.connect import ConnectIn, ConnectOut, DataOut
+from src.utils.dtos.linkedin import LinkedinIn
 
 
 class LinkedinsService:
-    def __init__(self,usuarios_service:UsuariosService, linkedins_repository: LinkedinsRepository):
+    def __init__(self, usuarios_service: UsuariosService, linkedins_repository: LinkedinsRepository):
         self.usuarios_service = usuarios_service
         self.linkedins_repository = linkedins_repository
 
     async def get_all_linkedins(self) -> List[LinkedinModel]:
         return await self.linkedins_repository.get_all()
-    
+
     async def get_usuarios_by_id(self, id: int) -> Optional[LinkedinModel]:
         pessoa = await self.linkedins_repository.get_by_id(id)
         if not pessoa:
@@ -51,59 +50,62 @@ class LinkedinsService:
         linkedin_data = linkedin_dto.model_dump()
         linkedin_data.pop('usuario_id', None)
         linkedin: LinkedinModel = LinkedinModel(**linkedin_data)
-        linkedin.usuario = usuario 
-        
+        linkedin.usuario = usuario
+
         return await self.linkedins_repository.create(linkedin)
-    
+
     async def delete_linkedin(self, id: int) -> bool:
         return await self.linkedins_repository.delete(id)
-    
+
     async def get_linkedin_by_email(self, email: str) -> Optional[LinkedinModel]:
         pessoa = await self.linkedins_repository.get_by_email(email)
         if not pessoa:
             raise HTTPException(status_code=404, detail="Linkedin não encontrada")
         return pessoa
-    
+
+    def _initialize_driver(self, headless: bool) -> webdriver.Chrome:
+        service = Service(ChromeDriverManager().install())
+        chrome_options = Options()
+        if headless:
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+        return webdriver.Chrome(service=service, options=chrome_options)
+
+    async def _login_to_linkedin(self, driver: webdriver.Chrome, email: str, password: str):
+        driver.get("https://www.linkedin.com/login")
+        time.sleep(3)
+        driver.find_element(By.ID, "username").send_keys(email)
+        driver.find_element(By.ID, "password").send_keys(password)
+        driver.find_element(By.ID, "password").send_keys(Keys.RETURN)
+        time.sleep(5)
+
+    async def _navigate_to_connections(self, driver: webdriver.Chrome):
+        driver.get("https://www.linkedin.com/mynetwork")
+        time.sleep(5)
+
     async def get_connections(self, connect_obj: ConnectIn) -> ConnectOut:
         usuario = await self.usuarios_service.get_usuarios_by_id(connect_obj.usuario_id)
         if not usuario:
             raise HTTPException(status_code=404, detail="usuario não encontrada")
-        
-        linkedin = await  self.linkedins_repository.get_by_id(usuario.linkedin_id)
+
+        linkedin = await self.linkedins_repository.get_by_id(usuario.linkedin_id)
         if not linkedin:
             raise HTTPException(status_code=404, detail="Linkedin não encontrada")
-        
-        EMAIL:str = linkedin.email
-        PASSWORD:str = linkedin.password
 
-        service = Service(ChromeDriverManager().install())
-        chrome_options = Options()
-        if not connect_obj.mode_view:
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
+        driver = self._initialize_driver(not connect_obj.mode_view)
+        await self._login_to_linkedin(driver, linkedin.email, linkedin.password)
+        await self._navigate_to_connections(driver)
 
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        MAX_CONEXOES: int = 50
+        conexoes_realizadas: int = 0
 
-        MAX_CONEXOES:int = 50
-        conexoes_realizadas:int = 0
         try:
-            driver.get("https://www.linkedin.com/login")
-            time.sleep(3)
-
-            driver.find_element(By.ID, "username").send_keys(EMAIL)
-            driver.find_element(By.ID, "password").send_keys(PASSWORD)
-            driver.find_element(By.ID, "password").send_keys(Keys.RETURN)
-            time.sleep(5)
-
-            driver.get("https://www.linkedin.com/mynetwork")
-            time.sleep(5)
-
             while conexoes_realizadas < MAX_CONEXOES:
                 botoes_conectar = driver.find_elements(By.XPATH, "//button[.//span[contains(text(),'Conectar')]]")
                 for botao in botoes_conectar:
                     if conexoes_realizadas >= MAX_CONEXOES:
-                        break 
+                        break
 
                     try:
                         botao.click()
@@ -115,10 +117,10 @@ class LinkedinsService:
 
                 if conexoes_realizadas < MAX_CONEXOES:
                     driver.refresh()
-                    time.sleep(5) 
+                    time.sleep(5)
         finally:
             driver.quit()  # Fecha o navegador
-        
+
         return ConnectOut(total_connections=conexoes_realizadas, message_connections="Meta de conexões atingida!")
 
     async def get_data_rede(self, connect_obj: ConnectIn) -> DataOut:
@@ -126,35 +128,19 @@ class LinkedinsService:
         if not usuario:
             raise HTTPException(status_code=404, detail="usuario não encontrada")
 
-        linkedin = await  self.linkedins_repository.get_by_id(usuario.linkedin_id)
+        linkedin = await self.linkedins_repository.get_by_id(usuario.linkedin_id)
         if not linkedin:
             raise HTTPException(status_code=404, detail="Linkedin não encontrada")
 
-        EMAIL: str = linkedin.email
-        PASSWORD: str = linkedin.password
-
-        service = Service(ChromeDriverManager().install())
-        chrome_options = Options()
-        if not connect_obj.mode_view:
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = self._initialize_driver(not connect_obj.mode_view)
+        await self._login_to_linkedin(driver, linkedin.email, linkedin.password)
+        await self._navigate_to_connections(driver)
 
         MAX_CONEXOES: int = 0
         cards_visitados: int = 0
         lista_de_dicionarios: List[Dict[str, str]] = []
-        
+
         try:
-            driver.get("https://www.linkedin.com/login")
-            time.sleep(3)
-
-            driver.find_element(By.ID, "username").send_keys(EMAIL)
-            driver.find_element(By.ID, "password").send_keys(PASSWORD)
-            driver.find_element(By.ID, "password").send_keys(Keys.RETURN)
-            time.sleep(5)
-
             driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
             time.sleep(5)
 
@@ -178,13 +164,14 @@ class LinkedinsService:
 
                         cards_visitados += 1
                         if cards_visitados >= MAX_CONEXOES:
-                            break 
+                            break
 
                     driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                     time.sleep(5)
 
                     try:
-                        exibir_mais_btn = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.XPATH, "//button[span[text()='Exibir mais resultados']]")))
+                        exibir_mais_btn = WebDriverWait(driver, 10).until(EC.visibility_of_element_located(
+                            (By.XPATH, "//button[span[text()='Exibir mais resultados']]")))
                         exibir_mais_btn.click()
                         time.sleep(5)
                     except Exception as e:
@@ -205,4 +192,6 @@ class LinkedinsService:
             stacks = pessoa["stack"].split(" | ")
             stack_counter.update(stacks)
         stack_mais_comum, frequencia_apr = stack_counter.most_common(1)[0]
-        return DataOut(total_connections=MAX_CONEXOES,total_analisados=cards_visitados,perfil_mais_encontrado=stack_mais_comum,frequencia=frequencia_apr,message_porcentagem=f' essa stack corresponde a {round(float((frequencia_apr*100)/cards_visitados),2)} % da sua rede')
+        return DataOut(total_connections=MAX_CONEXOES, total_analisados=cards_visitados,
+                       perfil_mais_encontrado=stack_mais_comum, frequencia=frequencia_apr,
+                       message_porcentagem=f' essa stack corresponde a {round(float((frequencia_apr * 100) / cards_visitados), 2)} % da sua rede')
