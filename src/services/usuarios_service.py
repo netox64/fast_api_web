@@ -23,7 +23,7 @@ class UsuariosService:
         return pessoa
 
     async def create_usuarios(self, usuario_dto:UserCreate) -> UsuariosModel:
-        usuario_com_email = await self.get_usuario_by_email(str(usuario_dto.email))
+        usuario_com_email = await self.usuarios_repository.get_by_email(str(usuario_dto.email))
         if usuario_com_email:
             raise HTTPException(status_code=409, detail="Ja existe um usuario com esse email no sistema")
         hashed_password:str = self.pwd_context.hash(usuario_dto.password)

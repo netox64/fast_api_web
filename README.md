@@ -44,20 +44,26 @@
    sudo apt install python3.12-venv &&
    python3 -m venv venv
 ```
+
 - activate venv
 ```
    source venv/bin/activate
 
 ```
-- install dependencies
+
+- create database in dbeaver with postgres of name fast_api
+
+- install dependencies e create and create tables
 ```
-   docker-compose up -d &&
+   docker-compose up -d && python create_main.py &&
    pip install -r requirements.txt
 ```
+
 - run docs
 ```
    uvicorn main:app --reload
 ```
+
 - go
 
 http://localhost:8000/docs
